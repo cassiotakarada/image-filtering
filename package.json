@@ -1,0 +1,29 @@
+{
+  "name": "babylon-filter-spike",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Spike: GPU image-filter engine (Babylon.js) behind a Cornerstone3D display seam, vs CPU baseline and ONNX learned filter. Throwaway proof-of-concept for CSOI-Web.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@babylonjs/core": "^7.54.0",
+    "@cornerstonejs/core": "^4.15.21",
+    "@cornerstonejs/dicom-image-loader": "^4.15.21",
+    "@cornerstonejs/tools": "^4.15.21",
+    "dicom-parser": "^1.8.21",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.5"
+  }
+}

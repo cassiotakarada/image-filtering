@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Babylon Filter Spike — CSOI-Web</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // Dev-only: surface startup errors on the page so a blank screen shows why.
+      function __showErr(msg) {
+        var r = document.getElementById("root");
+        if (!r) return;
+        r.innerHTML =
+          '<pre style="white-space:pre-wrap;color:#f85149;background:#0d1117;' +
+          'padding:16px;margin:0;min-height:100vh;font:13px ui-monospace,monospace">' +
+          String(msg).replace(/</g, "&lt;") + "</pre>";
+      }
+      window.addEventListener("error", function (e) {
+        __showErr((e.error && e.error.stack) || e.message || String(e));
+      });
+      window.addEventListener("unhandledrejection", function (e) {
+        __showErr(
+          "Unhandled promise rejection:\n" +
+            ((e.reason && e.reason.stack) || e.reason || "")
+        );
+      });
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
