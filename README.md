@@ -78,6 +78,30 @@ In the page:
   speedup vs the CPU baseline.
 - **Show original** — re-display the un-filtered source (the `wadouri:` image).
 
+### Benchmark table layout
+
+The benchmark panel always shows **exactly five rows in this order**
+(backend-grouped, CPU last):
+
+1. **Babylon (WebGL, worker)** — full filter graph in a Web Worker
+2. **Cornerstone (WebGL)** — Cornerstone3D's own GPU window/level on its WebGL2
+   backend (windowing only; "vs CPU" stays `—`)
+3. **Babylon (WebGPU, main thread)** — same Babylon engine, WebGPU backend
+4. **Cornerstone (WebGPU)** — **always `n/a`**. Cornerstone3D 4.15 has no
+   WebGPU backend (its init code only probes `webgl2 / webgl / experimental-webgl`),
+   so this row is a permanent placeholder for environment documentation. It
+   will populate automatically if/when upstream ships WebGPU support. The
+   note distinguishes the two failure modes:
+   - `"Cornerstone3D 4.15 has no WebGPU backend"` — your browser has WebGPU
+     but Cornerstone doesn't.
+   - `"WebGPU not available"` — your browser itself lacks WebGPU.
+5. **CPU (JavaScript)** — speedup baseline (`vs CPU = baseline`)
+
+The row set is **constant across environments** — a browser without WebGPU
+still shows all five rows (the WebGPU rows just report `n/a` with a reason
+note). See [specs/001-cornerstone-engines/contracts/benchmark-rows.md](specs/001-cornerstone-engines/contracts/benchmark-rows.md)
+for the full UI contract.
+
 ### Build / type-check
 
 ```bash

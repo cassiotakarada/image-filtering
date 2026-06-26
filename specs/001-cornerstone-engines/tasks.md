@@ -51,7 +51,7 @@ from "vs CPU" speedup ratio).
 **⚠️ CRITICAL**: Both user stories depend on this phase. No US1/US2 work can
 land until T001 is complete.
 
-- [ ] T001 Narrow [`BenchRow.kind`](src/components/BenchmarkPanel.tsx) from `string` to the literal union `"babylon" | "webgpu" | "cpu" | "cornerstone-webgl" | "cornerstone-webgpu"` in [src/components/BenchmarkPanel.tsx](src/components/BenchmarkPanel.tsx); update the JSDoc to list the five values; leave the `comparable` check (`r.kind === "babylon" || r.kind === "webgpu"`) unchanged — it already excludes both new Cornerstone kinds, satisfying VR-3 / C-5
+- [X] T001 Narrow [`BenchRow.kind`](src/components/BenchmarkPanel.tsx) from `string` to the literal union `"babylon" | "webgpu" | "cpu" | "cornerstone-webgl" | "cornerstone-webgpu"` in [src/components/BenchmarkPanel.tsx](src/components/BenchmarkPanel.tsx); update the JSDoc to list the five values; leave the `comparable` check (`r.kind === "babylon" || r.kind === "webgpu"`) unchanged — it already excludes both new Cornerstone kinds, satisfying VR-3 / C-5
 
 **Checkpoint**: Foundation ready — both user stories can now begin in parallel.
 
@@ -73,10 +73,10 @@ Per-quickstart.md sections "Verification on a WebGPU-capable browser" steps
 
 ### Implementation for User Story 1
 
-- [ ] T002 [US1] Rename WebGL bench helpers in [src/dicom/cornerstoneSetup.ts](src/dicom/cornerstoneSetup.ts): `cornerstoneBenchSetSource` → `cornerstoneBenchSetSourceWebGL` and `cornerstoneBenchRender` → `cornerstoneBenchRenderWebGL` (no functional change; leaves the existing `ensureBenchViewport()` singleton — VR-5 — intact)
-- [ ] T003 [US1] Update [src/dicom/index.ts](src/dicom/index.ts) re-exports to use the new helper names from T002
-- [ ] T004 [US1] In [src/App.tsx](src/App.tsx), update the imports from `./dicom` to the new helper names (`cornerstoneBenchSetSourceWebGL`, `cornerstoneBenchRenderWebGL`)
-- [ ] T005 [US1] In [src/App.tsx](src/App.tsx) `runBenchmark`, replace the trailing `kind: "cornerstone"` row construction with `kind: "cornerstone-webgl"`, label `"Cornerstone (WebGL)"`, keep `note: "windowing only"` on success, keep `backend: cornerstoneBackend()`, and ensure the failure path also emits `kind: "cornerstone-webgl"` with `backend: cornerstoneBackend()` so the row is always present (FR-006, C-3)
+- [X] T002 [US1] Rename WebGL bench helpers in [src/dicom/cornerstoneSetup.ts](src/dicom/cornerstoneSetup.ts): `cornerstoneBenchSetSource` → `cornerstoneBenchSetSourceWebGL` and `cornerstoneBenchRender` → `cornerstoneBenchRenderWebGL` (no functional change; leaves the existing `ensureBenchViewport()` singleton — VR-5 — intact)
+- [X] T003 [US1] Update [src/dicom/index.ts](src/dicom/index.ts) re-exports to use the new helper names from T002
+- [X] T004 [US1] In [src/App.tsx](src/App.tsx), update the imports from `./dicom` to the new helper names (`cornerstoneBenchSetSourceWebGL`, `cornerstoneBenchRenderWebGL`)
+- [X] T005 [US1] In [src/App.tsx](src/App.tsx) `runBenchmark`, replace the trailing `kind: "cornerstone"` row construction with `kind: "cornerstone-webgl"`, label `"Cornerstone (WebGL)"`, keep `note: "windowing only"` on success, keep `backend: cornerstoneBackend()`, and ensure the failure path also emits `kind: "cornerstone-webgl"` with `backend: cornerstoneBackend()` so the row is always present (FR-006, C-3)
 
 **Checkpoint**: US1 complete — running the benchmark on any WebGL-capable
 browser produces a `Cornerstone (WebGL)` row in its labeled slot. The
@@ -107,11 +107,11 @@ not) — quickstart.md "Verification on a WebGPU-capable browser" step 3 +
 
 ### Implementation for User Story 2
 
-- [ ] T006 [US2] Add `cornerstoneBenchProbeWebGPU()` in [src/dicom/cornerstoneSetup.ts](src/dicom/cornerstoneSetup.ts) that synchronously returns `{ backend: typeof navigator !== "undefined" && (navigator as any).gpu ? "WebGPU (no Cornerstone support)" : "WebGPU not available", note: typeof navigator !== "undefined" && (navigator as any).gpu ? "Cornerstone3D 4.15 has no WebGPU backend" : "WebGPU not available" }` — no rendering, no viewport, no resources allocated (VR-5 trivially satisfied per research R3)
-- [ ] T007 [US2] Re-export `cornerstoneBenchProbeWebGPU` from [src/dicom/index.ts](src/dicom/index.ts)
-- [ ] T008 [US2] In [src/App.tsx](src/App.tsx), import `cornerstoneBenchProbeWebGPU` from `./dicom`
-- [ ] T009 [US2] Refactor [src/App.tsx](src/App.tsx) `runBenchmark` to build the rows array in the **locked C-2 order** by name-keyed assembly: time each engine into a local map (`babylonRow`, `webgpuRow`, `cpuRow`, `cornerstoneWebGLRow`, `cornerstoneWebGPURow`), then `setBench([babylonRow, cornerstoneWebGLRow, webgpuRow, cornerstoneWebGPURow, cpuRow])` — guaranteeing VR-1 (one of each kind) and VR-2 (correct order) regardless of which probes/engines succeeded. **Must preserve** the existing warmup-discard + `BENCH_SAMPLES` median sampling pattern for every timed row (FR-010); only the placeholder Cornerstone-WebGPU row is exempt from timing.
-- [ ] T010 [US2] In [src/App.tsx](src/App.tsx) `runBenchmark`, populate `cornerstoneWebGPURow` from `cornerstoneBenchProbeWebGPU()` as `{ kind: "cornerstone-webgpu", name: "Cornerstone (WebGPU)", ms: null, note, backend }` — the row is **unconditionally** present with `ms: null` (FR-007, FR-007a, FR-012, C-9)
+- [X] T006 [US2] Add `cornerstoneBenchProbeWebGPU()` in [src/dicom/cornerstoneSetup.ts](src/dicom/cornerstoneSetup.ts) that synchronously returns `{ backend: typeof navigator !== "undefined" && (navigator as any).gpu ? "WebGPU (no Cornerstone support)" : "WebGPU not available", note: typeof navigator !== "undefined" && (navigator as any).gpu ? "Cornerstone3D 4.15 has no WebGPU backend" : "WebGPU not available" }` — no rendering, no viewport, no resources allocated (VR-5 trivially satisfied per research R3)
+- [X] T007 [US2] Re-export `cornerstoneBenchProbeWebGPU` from [src/dicom/index.ts](src/dicom/index.ts)
+- [X] T008 [US2] In [src/App.tsx](src/App.tsx), import `cornerstoneBenchProbeWebGPU` from `./dicom`
+- [X] T009 [US2] Refactor [src/App.tsx](src/App.tsx) `runBenchmark` to build the rows array in the **locked C-2 order** by name-keyed assembly: time each engine into a local map (`babylonRow`, `webgpuRow`, `cpuRow`, `cornerstoneWebGLRow`, `cornerstoneWebGPURow`), then `setBench([babylonRow, cornerstoneWebGLRow, webgpuRow, cornerstoneWebGPURow, cpuRow])` — guaranteeing VR-1 (one of each kind) and VR-2 (correct order) regardless of which probes/engines succeeded. **Must preserve** the existing warmup-discard + `BENCH_SAMPLES` median sampling pattern for every timed row (FR-010); only the placeholder Cornerstone-WebGPU row is exempt from timing.
+- [X] T010 [US2] In [src/App.tsx](src/App.tsx) `runBenchmark`, populate `cornerstoneWebGPURow` from `cornerstoneBenchProbeWebGPU()` as `{ kind: "cornerstone-webgpu", name: "Cornerstone (WebGPU)", ms: null, note, backend }` — the row is **unconditionally** present with `ms: null` (FR-007, FR-007a, FR-012, C-9)
 
 **Checkpoint**: US2 complete — the benchmark table is locked to the
 five-row, backend-grouped contract from C-1 / C-2 on every browser.
@@ -123,9 +123,9 @@ five-row, backend-grouped contract from C-1 / C-2 on every browser.
 **Purpose**: User-facing hint text, README documentation, and reviewer
 validation.
 
-- [ ] T011 Update the explanatory `<p className="hint">` paragraph in [src/components/BenchmarkPanel.tsx](src/components/BenchmarkPanel.tsx) to cover (a) Babylon/CPU = upload + compute + readback, (b) **both** Cornerstone rows = set VOI → GPU render → IMAGE_RENDERED (no readback), windowing only, and (c) the Cornerstone-WebGPU row is `n/a` because Cornerstone3D's pinned version has no WebGPU backend, kept as a permanent placeholder for environment documentation (C-10). **Content depends on US2** (T010) because the hint references the Cornerstone-WebGPU row — schedule after US2, do not parallelize across the US1/US2 boundary.
-- [ ] T012 [P] Update [README.md](README.md) to document the new 5-row benchmark layout (backend-grouped, CPU last) and the rationale for the always-`n/a` Cornerstone-WebGPU placeholder, so a first-time reviewer is not confused by the missing number (quickstart.md "Pass criteria")
-- [ ] T013 Run `npm run build` from the repo root and confirm it succeeds (tsc --noEmit + vite build with no type errors) — covers VR-3 / C-5 statically because the narrowed `kind` union from T001 forces the comparable-check to remain exclusive
+- [X] T011 Update the explanatory `<p className="hint">` paragraph in [src/components/BenchmarkPanel.tsx](src/components/BenchmarkPanel.tsx) to cover (a) Babylon/CPU = upload + compute + readback, (b) **both** Cornerstone rows = set VOI → GPU render → IMAGE_RENDERED (no readback), windowing only, and (c) the Cornerstone-WebGPU row is `n/a` because Cornerstone3D's pinned version has no WebGPU backend, kept as a permanent placeholder for environment documentation (C-10). **Content depends on US2** (T010) because the hint references the Cornerstone-WebGPU row — schedule after US2, do not parallelize across the US1/US2 boundary.
+- [X] T012 [P] Update [README.md](README.md) to document the new 5-row benchmark layout (backend-grouped, CPU last) and the rationale for the always-`n/a` Cornerstone-WebGPU placeholder, so a first-time reviewer is not confused by the missing number (quickstart.md "Pass criteria")
+- [X] T013 Run `npm run build` from the repo root and confirm it succeeds (tsc --noEmit + vite build with no type errors) — covers VR-3 / C-5 statically because the narrowed `kind` union from T001 forces the comparable-check to remain exclusive
 - [ ] T014 Walk [quickstart.md](specs/001-cornerstone-engines/quickstart.md) end-to-end in a WebGPU-capable browser (Chrome 113+) — verify all 7 steps in "Verification on a WebGPU-capable browser" plus the 4 cross-environment FR-007a checks. **This is the runtime acceptance gate** for the feature (per constitution Development Workflow "browser validation gap")
 
 ---

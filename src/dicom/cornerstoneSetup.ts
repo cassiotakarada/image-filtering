@@ -309,8 +309,46 @@ export function cornerstoneBackend(): string {
   return "no WebGL";
 }
 
+/**
+ * Probe for Cornerstone3D's WebGPU backend.
+ *
+ * Cornerstone3D 4.15.x has no WebGPU backend (verified against the v4.15.21
+ * tag: init.ts only probes webgl2/webgl/experimental-webgl, no navigator.gpu
+ * path). This is a documentation-only probe: it allocates nothing, renders
+ * nothing, and always reports `ms: null` to the benchmark. It distinguishes
+ * two distinct failure modes so reviewers can tell them apart:
+ *
+ *   - Browser supports WebGPU but Cornerstone3D doesn't expose it →
+ *     backend `"WebGPU (no Cornerstone support)"`, note
+ *     `"Cornerstone3D 4.15 has no WebGPU backend"`.
+ *   - Browser itself lacks WebGPU →
+ *     backend `"WebGPU not available"`, note `"WebGPU not available"`.
+ *
+ * If/when upstream ships a WebGPU backend, this probe is the single point
+ * that swaps to a real renderer.
+ */
+export function cornerstoneBenchProbeWebGPU(): {
+  backend: string;
+  note: string;
+} {
+  const hasWebGPU =
+    typeof navigator !== "undefined" &&
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    typeof (navigator as any).gpu !== "undefined";
+  if (hasWebGPU) {
+    return {
+      backend: "WebGPU (no Cornerstone support)",
+      note: "Cornerstone3D 4.15 has no WebGPU backend",
+    };
+  }
+  return {
+    backend: "WebGPU not available",
+    note: "WebGPU not available",
+  };
+}
+
 /** Register a source buffer into the offscreen bench viewport; returns its window. */
-export async function cornerstoneBenchSetSource(
+export async function cornerstoneBenchSetSourceWebGL(
   img: ImageBuffer
 ): Promise<{ center: number; width: number }> {
   ensureBenchViewport();
@@ -338,7 +376,7 @@ export async function cornerstoneBenchSetSource(
  * Time one Cornerstone GPU window/level render (set VOI → render → rendered).
  * `jitter` nudges the VOI so identical successive calls still trigger a redraw.
  */
-export function cornerstoneBenchRender(
+export function cornerstoneBenchRenderWebGL(
   center: number,
   width: number,
   jitter: number
