@@ -1,4 +1,4 @@
-import type { FilterParams } from "../types";
+import type { FilterParams, StageTimings } from "../types";
 
 /** Messages from main thread → worker. */
 export type ToWorker =
@@ -36,5 +36,12 @@ export type FromWorker =
       max: number;
       elapsedMs: number;
       data: Float32Array; // transferred
+      /**
+       * Per-stage decomposition (4 of 5 stages). Worker emits
+       * `compile / upload / compute / readback`; `roundTrip` is filled by
+       * `BabylonFilterEngine` on the main thread because the worker has no
+       * visibility into its own postMessage overhead.
+       */
+      stages?: Omit<StageTimings, "roundTrip">;
     }
   | { type: "error"; id?: number; message: string };

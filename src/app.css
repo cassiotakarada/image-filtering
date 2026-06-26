@@ -230,3 +230,19 @@ input[type="range"] {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+/* Per-stage breakdown sub-row under each Babylon row (spec 002 C-2). */
+.bench tr.stages-row td.stages {
+  color: var(--muted, #777);
+  font-size: 0.85em;
+  padding-top: 0.1rem;
+  padding-bottom: 0.5rem;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid var(--border);
+}
+
+.bench tr.stages-row td.stages .stages-arrow {
+  margin-right: 0.25rem;
+  opacity: 0.7;
+}

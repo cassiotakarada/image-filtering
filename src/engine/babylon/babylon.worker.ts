@@ -207,6 +207,26 @@ function uploadClahe(maps: ClaheMaps) {
 async function handleRun(id: number, params: FilterParams) {
   if (!proc || !input) throw new Error("image not set");
 
+  // -------------------------------------------------------------------------
+  // Per-stage timing (spec 002, contracts/stage-breakdown.md C-1):
+  //   t_run_start  → t_after_isReady  → t_after_uniforms
+  //                → t_after_render   → t_after_readPixels
+  // compile = isReady wait (0 when warm). upload = uniform setters + CLAHE/LUT.
+  // compute = proc.render() only. readback = await proc.readPixels().
+  // elapsedMs = compile + upload + compute + readback (constitution Principle
+  // IV: exactly one readPixels per run; no extra gl.finish() / GPU syncs).
+  // -------------------------------------------------------------------------
+  const tRunStart = performance.now();
+
+  // compile: one-time shader compile happens here. Polling is async-await so a
+  // not-yet-ready shader yields control rather than blocking the worker.
+  for (let i = 0; i < 600 && !proc.isReady(); i++) await sleep(2);
+  if (!proc.isReady())
+    throw new Error(
+      `filter shader failed to compile (${useWebGPU ? "WebGPU" : "WebGL"})`
+    );
+  const tAfterIsReady = performance.now();
+
   // Base window: auto-fit (percentile) or DICOM default, then slider-modulated.
   const baseCenter = params.autoWindow ? autoWin.center : imgCenter;
   const baseWidth = params.autoWindow ? autoWin.width : imgWidth;
@@ -289,21 +309,24 @@ async function handleRun(id: number, params: FilterParams) {
   // Color output only when a color visualization is on (class-map or tint);
   // otherwise R=G=B and we read a single channel as before.
   const color = params.segEnabled && (params.segView === "map" || params.segTint);
+  const tAfterUniforms = performance.now();
 
-  // One-time shader compile happens here; keep it out of the timed region.
-  for (let i = 0; i < 600 && !proc.isReady(); i++) await sleep(2);
-  if (!proc.isReady())
-    throw new Error(
-      `filter shader failed to compile (${useWebGPU ? "WebGPU" : "WebGL"})`
-    );
-
-  const t0 = performance.now();
   proc.render();
+  const tAfterRender = performance.now();
+
   const raw = (await proc.readPixels()) as Float32Array | null;
-  const elapsedMs = performance.now() - t0;
+  const tAfterReadPixels = performance.now();
   if (!raw) throw new Error("readPixels returned null");
 
+  const compile = tAfterIsReady - tRunStart;
+  const upload = tAfterUniforms - tAfterIsReady;
+  const compute = tAfterRender - tAfterUniforms;
+  const readback = tAfterReadPixels - tAfterRender;
+  const elapsedMs = tAfterReadPixels - tRunStart;
+
   // Output is RGBA float. Grayscale: R=G=B, pull one channel. Color: pull RGB.
+  // CPU unpacking is intentionally OUTSIDE the timed region (contract C-1
+  // "readback excludes the CPU-side un-interleave loop").
   const n = imgW * imgH;
   let out: Float32Array;
   if (color) {
@@ -329,6 +352,7 @@ async function handleRun(id: number, params: FilterParams) {
       max: OUTPUT_MAX,
       elapsedMs,
       data: out,
+      stages: { compile, upload, compute, readback },
     },
     [out.buffer]
   );

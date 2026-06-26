@@ -20,6 +20,13 @@ export class BabylonFilterEngine implements FilterEngine {
     number,
     { resolve: (r: FilterResult) => void; reject: (e: Error) => void }
   >();
+  /**
+   * Main-thread `performance.now()` taken immediately before `post({type:"run"})`,
+   * keyed by run id. Used to compute the `roundTrip` stage (spec 002, contract
+   * C-1) as `max(0, (tRecv - tSend) - worker.elapsedMs)`. Parallel to `pending`
+   * — entries are removed in the same code paths (resolve / reject / dispose).
+   */
+  private runSendAt = new Map<number, number>();
   private readyResolve: (() => void) | null = null;
   private readyReject: ((e: Error) => void) | null = null;
   private imageSetResolve: (() => void) | null = null;
@@ -97,6 +104,10 @@ export class BabylonFilterEngine implements FilterEngine {
     const id = this.nextId++;
     return new Promise<FilterResult>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
+      // Capture send-side wall-clock so the main thread can attribute the
+      // round-trip overhead (post → onmessage minus worker-side elapsedMs)
+      // — see spec 002 C-1 `roundTrip`.
+      this.runSendAt.set(id, performance.now());
       this.post({ type: "run", id, params });
     });
   }
@@ -106,6 +117,7 @@ export class BabylonFilterEngine implements FilterEngine {
     this.worker = null;
     this.available = false;
     this.pending.clear();
+    this.runSendAt.clear();
   }
 
   private post(msg: ToWorker, transfer: Transferable[] = []) {
@@ -133,9 +145,28 @@ export class BabylonFilterEngine implements FilterEngine {
         this.imageSetResolve = null;
         break;
       case "result": {
+        // Capture receive-time first so roundTrip excludes the resolve() work.
+        const tRecv = performance.now();
         const p = this.pending.get(msg.id);
-        if (!p) return;
+        if (!p) {
+          this.runSendAt.delete(msg.id);
+          return;
+        }
         this.pending.delete(msg.id);
+        const tSend = this.runSendAt.get(msg.id);
+        this.runSendAt.delete(msg.id);
+        // roundTrip = wall-clock around the postMessage pair MINUS the worker's
+        // self-reported elapsedMs (which is the time the worker spent inside
+        // run()). Clamped at 0 to absorb clock-noise on warm runs where the
+        // worker reports a slightly larger elapsedMs than the main thread saw.
+        // See spec 002 research.md Decision 4.
+        const stages =
+          msg.stages && tSend != null
+            ? {
+                ...msg.stages,
+                roundTrip: Math.max(0, tRecv - tSend - msg.elapsedMs),
+              }
+            : undefined;
         p.resolve({
           data: msg.data,
           width: msg.width,
@@ -144,6 +175,7 @@ export class BabylonFilterEngine implements FilterEngine {
           min: msg.min,
           max: msg.max,
           elapsedMs: msg.elapsedMs,
+          stages,
         });
         break;
       }
@@ -152,6 +184,7 @@ export class BabylonFilterEngine implements FilterEngine {
         if (msg.id != null && this.pending.has(msg.id)) {
           this.pending.get(msg.id)!.reject(err);
           this.pending.delete(msg.id);
+          this.runSendAt.delete(msg.id);
         } else {
           // Surface init/setImage failures.
           console.error("[BabylonFilterEngine]", err);

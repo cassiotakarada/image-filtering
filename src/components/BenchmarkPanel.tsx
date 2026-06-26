@@ -1,3 +1,6 @@
+import { Fragment } from "react";
+import type { StageTimings } from "../engine";
+
 export interface BenchRow {
   /**
    * Discriminator for the benchmark row. The five values lock the table's
@@ -21,6 +24,13 @@ export interface BenchRow {
   note?: string;
   /** Graphics backend label (e.g. "WebGL2"). */
   backend?: string;
+  /**
+   * Per-stage medians (same BENCH_SAMPLES window + warmup-discard as `ms`).
+   * Filled ONLY for `kind: "babylon"` and `kind: "webgpu"` rows. MUST be
+   * undefined on `cpu`, `cornerstone-webgl`, `cornerstone-webgpu`, and on
+   * any Babylon row whose `ms` is `null` (engine unavailable).
+   */
+  stages?: StageTimings;
 }
 
 interface Props {
@@ -64,30 +74,61 @@ export function BenchmarkPanel({ rows, size, samples }: Props) {
               comparable && r.ms != null && cpu != null && r.ms > 0
                 ? (cpu / r.ms).toFixed(1) + "×"
                 : "—";
+            // Stage breakdown sub-row: only the two Babylon rows surface it,
+            // and only when the engine produced a real `ms` (otherwise `stages`
+            // is undefined). See contracts/stage-breakdown.md C-2.
+            const showStages = comparable && r.stages != null;
             return (
-              <tr key={r.kind}>
-                <td>
-                  {r.name}
-                  {r.note ? <span className="note"> · {r.note}</span> : null}
-                </td>
-                <td>{r.backend ?? "—"}</td>
-                <td>{r.ms != null ? r.ms.toFixed(2) : "n/a"}</td>
-                <td>{r.kind === "cpu" ? "baseline" : speedup}</td>
-              </tr>
+              <Fragment key={r.kind}>
+                <tr>
+                  <td>
+                    {r.name}
+                    {r.note ? <span className="note"> · {r.note}</span> : null}
+                  </td>
+                  <td>{r.backend ?? "—"}</td>
+                  <td>{r.ms != null ? r.ms.toFixed(2) : "n/a"}</td>
+                  <td>{r.kind === "cpu" ? "baseline" : speedup}</td>
+                </tr>
+                {showStages ? (
+                  <tr className="stages-row">
+                    <td colSpan={4} className="stages">
+                      <span className="stages-arrow">↳</span> compile{" "}
+                      {r.stages!.compile.toFixed(2)} · upload{" "}
+                      {r.stages!.upload.toFixed(2)} · compute{" "}
+                      {r.stages!.compute.toFixed(2)} · readback{" "}
+                      {r.stages!.readback.toFixed(2)} · round-trip{" "}
+                      {r.stages!.roundTrip.toFixed(2)}
+                    </td>
+                  </tr>
+                ) : null}
+              </Fragment>
             );
           })}
         </tbody>
       </table>
       <p className="hint">
-        Babylon/CPU time = param upload + compute + GPU→CPU readback (the output
-        must be handed off). Both Cornerstone rows time = set VOI + GPU render
-        to the canvas via the IMAGE_RENDERED event (no readback) and only do
-        windowing — CLAHE/sharpen/segmentation have no Cornerstone equivalent,
-        so their "vs CPU" column stays `—`. The Cornerstone (WebGPU) row is
-        always `n/a` because Cornerstone3D's pinned version (4.15) has no
-        WebGPU backend; the row is kept as a permanent placeholder to document
-        the environment and will populate automatically once upstream support
-        lands.
+        Each Babylon row's <code>ms / run</code> decomposes into five stages
+        rendered on the sub-line beneath it (per-stage medians over the same{" "}
+        {samples}-sample window, computed independently). <b>compile</b> is the
+        wait for the filter shader to become ready inside <code>run()</code>{" "}
+        (usually 0 after warmup). <b>upload</b> covers per-run uniform setters,
+        the CLAHE map (re)build when CLAHE &gt; 0, and the LUT swap. <b>compute</b>{" "}
+        is the <code>proc.render()</code> GPU command submit. <b>readback</b> is{" "}
+        <code>await proc.readPixels()</code>, including the implicit GPU sync
+        that resolves it. <b>round-trip</b> is the main↔worker postMessage
+        overhead (always 0 on the WebGPU row — it runs on the main thread by
+        design, because Babylon's GLSL→WGSL transpiler can't be loaded from a
+        module worker). The first four stages sum to <code>ms / run</code>
+        within ~5%; round-trip is reported separately because it's outside the
+        engine's internal timed region. CPU and the two Cornerstone rows do
+        not show a breakdown: CPU runs as a single synchronous pass, and
+        Cornerstone does windowing only via <code>IMAGE_RENDERED</code> and
+        doesn't decompose into the Babylon-shaped stages — that's why their
+        "vs CPU" column stays <code>—</code> too. The Cornerstone (WebGPU) row
+        is always <code>n/a</code> because Cornerstone3D's pinned version
+        (4.15) has no WebGPU backend; the row is kept as a permanent
+        placeholder to document the environment and will populate
+        automatically once upstream support lands.
       </p>
     </div>
   );

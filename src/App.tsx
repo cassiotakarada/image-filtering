@@ -8,6 +8,7 @@ import {
   type FilterEngine,
   type FilterParams,
   type ImageBuffer,
+  type StageTimings,
 } from "./engine";
 import {
   cornerstoneBackend,
@@ -308,8 +309,12 @@ export default function App() {
     // Time each engine into a keyed map; assemble the final rows array in the
     // locked backend-grouped order from contracts/benchmark-rows.md C-2.
     // This guarantees VR-1 (one of each kind) and VR-2 (order) regardless of
-    // which engines succeed. Warmup-discard + BENCH_SAMPLES median sampling
-    // is preserved for every timed row (FR-010).
+    // which engines succeed. Each engine sample loop runs one discarded
+    // warmup() first so the median isn't dragged by first-run shader compile
+    // — matches the Cornerstone path below (FR-010, spec 002 FR-013, research
+    // Decision 3 "Implementation note"). On Babylon rows we also accumulate
+    // per-stage sample arrays and bundle their medians into `stages`
+    // (spec 002 FR-001/FR-009 + data-model "Aggregation pipeline").
     const engineRows: Partial<Record<EngineKind, BenchRow>> = {};
     const order: EngineKind[] = ["babylon", "webgpu", "cpu"];
     for (const k of order) {
@@ -319,17 +324,58 @@ export default function App() {
         continue;
       }
       try {
+        // Warmup: one discarded call before the timed loop. First-run shader
+        // compile / driver warmup would otherwise smear the `compile` stage's
+        // median upward and break the SC-002 reconciliation (sum ≈ elapsedMs).
+        await eng.run(params);
+
         const times: number[] = [];
+        // Per-stage sample arrays — populated only for Babylon-shaped engines
+        // (kind "babylon" / "webgpu"). CPU never emits `stages`.
+        const collectStages = k === "babylon" || k === "webgpu";
+        const compileSamples: number[] = [];
+        const uploadSamples: number[] = [];
+        const computeSamples: number[] = [];
+        const readbackSamples: number[] = [];
+        const roundTripSamples: number[] = [];
         for (let i = 0; i < BENCH_SAMPLES; i++) {
           const r = await eng.run(params);
           times.push(r.elapsedMs);
+          if (collectStages && r.stages) {
+            compileSamples.push(r.stages.compile);
+            uploadSamples.push(r.stages.upload);
+            computeSamples.push(r.stages.compute);
+            readbackSamples.push(r.stages.readback);
+            roundTripSamples.push(r.stages.roundTrip);
+          }
         }
         times.sort((a, b) => a - b);
+        const med = (xs: number[]) => xs[Math.floor(xs.length / 2)];
+        let stages: StageTimings | undefined;
+        if (collectStages && compileSamples.length === BENCH_SAMPLES) {
+          // Per-stage median is taken independently (not from one "median
+          // total" run) — robust to cross-stage variability where a stutter
+          // may slow `compute` on one run and `readback` on another. See
+          // data-model.md "Why per-stage median rather than median-of-totals".
+          compileSamples.sort((a, b) => a - b);
+          uploadSamples.sort((a, b) => a - b);
+          computeSamples.sort((a, b) => a - b);
+          readbackSamples.sort((a, b) => a - b);
+          roundTripSamples.sort((a, b) => a - b);
+          stages = {
+            compile: med(compileSamples),
+            upload: med(uploadSamples),
+            compute: med(computeSamples),
+            readback: med(readbackSamples),
+            roundTrip: med(roundTripSamples),
+          };
+        }
         engineRows[k] = {
           kind: k,
           name: eng.name,
           ms: times[Math.floor(times.length / 2)],
           backend: eng.backend,
+          stages,
         };
       } catch (err) {
         // One engine failing (e.g. WebGPU shader) must not abort the benchmark.

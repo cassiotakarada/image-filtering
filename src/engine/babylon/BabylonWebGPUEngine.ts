@@ -197,6 +197,17 @@ export class BabylonWebGPUEngine implements FilterEngine {
     if (!proc || !this.input || !this.imgData) throw new Error("image not set");
     const { imgW, imgH, imgData } = this;
 
+    // ---------------------------------------------------------------------
+    // Per-stage timing (spec 002, contracts/stage-breakdown.md C-1).
+    // Same boundary layout as babylon.worker.ts. roundTrip is 0 here because
+    // this engine runs on the main thread by design (spec FR-007).
+    // ---------------------------------------------------------------------
+    const tRunStart = performance.now();
+
+    for (let i = 0; i < 600 && !proc.isReady(); i++) await sleep(2);
+    if (!proc.isReady()) throw new Error("filter shader failed to compile (WebGPU)");
+    const tAfterIsReady = performance.now();
+
     const baseCenter = params.autoWindow ? this.autoWin.center : this.imgCenter;
     const baseWidth = params.autoWindow ? this.autoWin.width : this.imgWidth;
     const winCenter = baseCenter + params.brightness * baseWidth;
@@ -279,16 +290,22 @@ export class BabylonWebGPUEngine implements FilterEngine {
     proc.setFloat("outMax", OUTPUT_MAX);
 
     const color = params.segEnabled && (params.segView === "map" || params.segTint);
+    const tAfterUniforms = performance.now();
 
-    for (let i = 0; i < 600 && !proc.isReady(); i++) await sleep(2);
-    if (!proc.isReady()) throw new Error("filter shader failed to compile (WebGPU)");
-
-    const t0 = performance.now();
     proc.render();
+    const tAfterRender = performance.now();
+
     const raw = (await proc.readPixels()) as Float32Array | null;
-    const elapsedMs = performance.now() - t0;
+    const tAfterReadPixels = performance.now();
     if (!raw) throw new Error("readPixels returned null");
 
+    const compile = tAfterIsReady - tRunStart;
+    const upload = tAfterUniforms - tAfterIsReady;
+    const compute = tAfterRender - tAfterUniforms;
+    const readback = tAfterReadPixels - tAfterRender;
+    const elapsedMs = tAfterReadPixels - tRunStart;
+
+    // CPU un-interleave is outside the timed region (contract C-1).
     const n = imgW * imgH;
     let out: Float32Array;
     if (color) {
@@ -311,6 +328,8 @@ export class BabylonWebGPUEngine implements FilterEngine {
       min: 0,
       max: OUTPUT_MAX,
       elapsedMs,
+      // Main-thread engine — no postMessage hop, so roundTrip = 0 by design.
+      stages: { compile, upload, compute, readback, roundTrip: 0 },
     };
   }
 

@@ -1,4 +1,4 @@
-export type { FilterEngine, FilterParams, FilterResult, ImageBuffer } from "./types";
+export type { FilterEngine, FilterParams, FilterResult, ImageBuffer, StageTimings } from "./types";
 export { DEFAULT_FILTERS } from "./types";
 export type { Lut } from "../luts/types";
 export { BabylonFilterEngine } from "./babylon/BabylonFilterEngine";

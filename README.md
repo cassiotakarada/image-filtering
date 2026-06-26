@@ -102,6 +102,34 @@ still shows all five rows (the WebGPU rows just report `n/a` with a reason
 note). See [specs/001-cornerstone-engines/contracts/benchmark-rows.md](specs/001-cornerstone-engines/contracts/benchmark-rows.md)
 for the full UI contract.
 
+#### Per-stage breakdown (Babylon rows only)
+
+Each Babylon row carries a secondary sub-line that decomposes its
+`ms / run` into five per-stage medians (computed independently across the
+same 7-sample window, with one discarded warmup run before the loop):
+
+| Stage        | What it measures                                                                       |
+|--------------|----------------------------------------------------------------------------------------|
+| `compile`    | Shader-ready wait observed inside `run()` (`proc.isReady()` polling). 0 once warm.     |
+| `upload`     | Per-run uniform setters + CLAHE map (re)build when CLAHE > 0 + LUT swap.               |
+| `compute`    | `proc.render()` only — the GPU command-submit call.                                    |
+| `readback`   | `await proc.readPixels()`, including the implicit GPU sync.                            |
+| `round-trip` | Main↔worker postMessage overhead. Always 0 on the WebGPU row (main-thread by design).  |
+
+The first four sum to `ms / run` within ~5%; `round-trip` is reported
+separately because it lives outside the engine's internal timed region.
+CPU and the two Cornerstone rows have no breakdown — CPU is a single
+synchronous pass, and Cornerstone does windowing only via `IMAGE_RENDERED`.
+
+The breakdown is **read-only diagnostic**: it surfaces which stage
+dominates each row (e.g. "Babylon-WebGPU at ~285 ms is dominated by
+readback") so the perf gap is visible without dev-tools digging. Acting
+on the answer — moving the WebGPU engine off the main thread, or replacing
+`proc.readPixels()` with a pre-allocated mappable `GPUBuffer` — lives in
+a future feature, not this one. See
+[specs/002-babylon-perf-stage-timings/contracts/stage-breakdown.md](specs/002-babylon-perf-stage-timings/contracts/stage-breakdown.md)
+for the full contract.
+
 ### Build / type-check
 
 ```bash

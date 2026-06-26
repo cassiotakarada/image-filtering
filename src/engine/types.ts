@@ -110,6 +110,38 @@ export const DEFAULT_FILTERS: FilterParams = {
   segTint: false,
 };
 
+/**
+ * Per-stage decomposition of a single `run()` call.
+ *
+ * Five required, millisecond-valued, non-negative fields. `0` is meaningful —
+ * it means "stage was observed and contributed no measurable time" (e.g.
+ * `compile` on a warmed-up run, `roundTrip` on a main-thread engine). The
+ * *absence* of `FilterResult.stages` entirely means "this engine does not
+ * decompose into these stages" (e.g. CPU).
+ *
+ * Boundaries are observation-only `performance.now()` reads at JS call sites
+ * — no `gl.finish()`, no extra GPU syncs (constitution Principle IV).
+ *
+ * Inclusion / exclusion rules (see contracts/stage-breakdown.md C-1):
+ *   compile  — wait observed inside run() for the filter shader to become
+ *              ready (proc.isReady() polling). Excludes engine init().
+ *   upload   — per-run uniform setters, CLAHE map build+bind when CLAHE > 0,
+ *              LUT swap. Excludes the one-time setImage() source upload.
+ *   compute  — proc.render() only (the GPU command-submit call).
+ *   readback — await proc.readPixels(). Includes the implicit GPU sync.
+ *              Excludes the CPU-side un-interleave loop.
+ *   roundTrip — main↔worker postMessage overhead (wall-clock around the
+ *               post→reply pair minus the worker's reported elapsedMs).
+ *               `0` on main-thread engines by design.
+ */
+export interface StageTimings {
+  compile: number;
+  upload: number;
+  compute: number;
+  readback: number;
+  roundTrip: number;
+}
+
 export interface FilterResult {
   data: Float32Array;
   width: number;
@@ -119,10 +151,21 @@ export interface FilterResult {
   min: number;
   max: number;
   /**
-   * Wall-clock ms inside the engine: parameter upload + compute + (GPU) readback.
-   * Excludes the one-time source upload in setImage(). This is the benchmark number.
+   * Wall-clock ms inside the engine: shader-ready wait + parameter upload +
+   * compute + (GPU) readback. Excludes the one-time source upload in
+   * setImage(). This is the benchmark number.
+   *
+   * When `stages` is present, the sum
+   * `compile + upload + compute + readback` MUST equal `elapsedMs` to within
+   * `max(1 ms, 5 %)` (contract C-3). `roundTrip` is intentionally NOT in this
+   * sum — it measures time outside the engine's internal timed region.
    */
   elapsedMs: number;
+  /**
+   * Optional per-stage decomposition of `elapsedMs`. Engines that don't
+   * decompose (e.g. CPU) omit it entirely.
+   */
+  stages?: StageTimings;
 }
 
 export interface FilterEngine {
