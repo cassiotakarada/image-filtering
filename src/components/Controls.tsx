@@ -27,7 +27,7 @@ interface Props {
 
 const ENGINE_LABELS: Record<EngineKind, string> = {
   babylon: "Babylon (WebGL, worker)",
-  webgpu: "Babylon (WebGPU, worker)",
+  webgpu: "Babylon (WebGPU, main thread)",
   cpu: "CPU (main thread)",
 };
 

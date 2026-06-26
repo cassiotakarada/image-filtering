@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BabylonFilterEngine,
+  BabylonWebGPUEngine,
   CpuFilterEngine,
   DEFAULT_FILTERS,
   type EngineKind,
@@ -95,10 +96,7 @@ export default function App() {
         backend: "webgl",
         name: "Babylon (WebGL, worker)",
       });
-      const webgpu = new BabylonFilterEngine({
-        backend: "webgpu",
-        name: "Babylon (WebGPU, worker)",
-      });
+      const webgpu = new BabylonWebGPUEngine();
       const cpu = new CpuFilterEngine();
       engines.current = { babylon, webgpu, cpu };
 
@@ -313,18 +311,29 @@ export default function App() {
         rows.push({ kind: k, name: eng.name, ms: null, backend: eng.backend });
         continue;
       }
-      const times: number[] = [];
-      for (let i = 0; i < BENCH_SAMPLES; i++) {
-        const r = await eng.run(params);
-        times.push(r.elapsedMs);
+      try {
+        const times: number[] = [];
+        for (let i = 0; i < BENCH_SAMPLES; i++) {
+          const r = await eng.run(params);
+          times.push(r.elapsedMs);
+        }
+        times.sort((a, b) => a - b);
+        rows.push({
+          kind: k,
+          name: eng.name,
+          ms: times[Math.floor(times.length / 2)],
+          backend: eng.backend,
+        });
+      } catch (err) {
+        // One engine failing (e.g. WebGPU shader) must not abort the benchmark.
+        rows.push({
+          kind: k,
+          name: eng.name,
+          ms: null,
+          backend: eng.backend,
+          note: err instanceof Error ? err.message : String(err),
+        });
       }
-      times.sort((a, b) => a - b);
-      rows.push({
-        kind: k,
-        name: eng.name,
-        ms: times[Math.floor(times.length / 2)],
-        backend: eng.backend,
-      });
     }
 
     // Cornerstone's own GPU window/level render — the "do I even need Babylon?"

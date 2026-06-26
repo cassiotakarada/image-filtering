@@ -289,14 +289,23 @@ function ensureBenchViewport(): void {
   benchViewport = benchEngine.getViewport(BENCH_VIEWPORT_ID);
 }
 
-/** Detect the WebGL version Cornerstone/vtk.js actually rendered with. */
+/**
+ * Detect the WebGL version Cornerstone/vtk.js renders with.
+ *
+ * NOTE: Cornerstone3D renders to ONE shared offscreen WebGL2 surface, then
+ * blits the result to each viewport's visible canvas with a 2D drawImage — so
+ * probing the viewport canvas finds a 2D context, not WebGL. Instead we probe a
+ * throwaway canvas for the WebGL capability of the same browser/GPU Cornerstone
+ * uses (Cornerstone3D requires WebGL2).
+ */
 export function cornerstoneBackend(): string {
-  ensureBenchViewport();
-  const canvas = benchElement?.querySelector("canvas") as HTMLCanvasElement | null;
-  if (!canvas) return "WebGL (unknown)";
-  // getContext returns the EXISTING context if the type matches what vtk created.
-  if (canvas.getContext("webgl2")) return "WebGL2";
-  if (canvas.getContext("webgl")) return "WebGL1";
+  try {
+    const c = document.createElement("canvas");
+    if (c.getContext("webgl2")) return "WebGL2";
+    if (c.getContext("webgl")) return "WebGL1";
+  } catch {
+    /* ignore */
+  }
   return "no WebGL";
 }
 

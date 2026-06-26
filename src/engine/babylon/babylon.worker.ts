@@ -173,6 +173,32 @@ function buildPipeline(data: Float32Array) {
   proc.setTexture("src", input);
 }
 
+/**
+ * Compile-probe the filter shader once (used for WebGPU). Our shader is GLSL;
+ * WebGPU needs WGSL, and Babylon's GLSL→WGSL transpiler (twgsl/glslang) loads
+ * via importScripts, which doesn't work in a module worker — so the shader
+ * never becomes ready. Detect that here so the engine reports itself unavailable
+ * cleanly instead of throwing on the first run().
+ */
+async function probeShaderReady(): Promise<boolean> {
+  if (!scene) return false;
+  const probe = new ProceduralTexture(
+    "probe",
+    { width: 1, height: 1 },
+    { fragmentSource: FILTER_FRAGMENT },
+    scene,
+    null,
+    false,
+    false,
+    Constants.TEXTURETYPE_FLOAT
+  );
+  probe.refreshRate = 0;
+  for (let i = 0; i < 400 && !probe.isReady(); i++) await sleep(2);
+  const ready = probe.isReady();
+  probe.dispose();
+  return ready;
+}
+
 function uploadClahe(maps: ClaheMaps) {
   claheTex?.dispose();
   claheTex = makeClaheTexture(maps.maps, maps.bins, maps.tilesX * maps.tilesY);
@@ -266,7 +292,10 @@ async function handleRun(id: number, params: FilterParams) {
 
   // One-time shader compile happens here; keep it out of the timed region.
   for (let i = 0; i < 600 && !proc.isReady(); i++) await sleep(2);
-  if (!proc.isReady()) throw new Error("filter shader failed to compile");
+  if (!proc.isReady())
+    throw new Error(
+      `filter shader failed to compile (${useWebGPU ? "WebGPU" : "WebGL"})`
+    );
 
   const t0 = performance.now();
   proc.render();
@@ -319,6 +348,18 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
             message:
               (useWebGPU ? "WebGPU unavailable: " : "WebGL init failed: ") +
               (e instanceof Error ? e.message : String(e)),
+          });
+          break;
+        }
+        // WebGPU: confirm our GLSL shader actually compiles (it can't, in a
+        // module worker, without the WGSL transpiler). Fail cleanly if not.
+        if (useWebGPU && !(await probeShaderReady())) {
+          post({
+            type: "initError",
+            message:
+              "WebGPU: GLSL filter shader could not be transpiled to WGSL in a " +
+              "module worker (twgsl/glslang needs importScripts). Would need a " +
+              "native WGSL shader.",
           });
           break;
         }

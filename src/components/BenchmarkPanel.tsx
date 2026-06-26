@@ -43,8 +43,12 @@ export function BenchmarkPanel({ rows, size, samples }: Props) {
         </thead>
         <tbody>
           {rows.map((r) => {
+            // Only Babylon/CPU do the SAME work, so only their ratio is a real
+            // speedup. Cornerstone does windowing only — comparing it to the
+            // full-pipeline CPU number would be meaningless, so we don't.
+            const comparable = r.kind === "babylon" || r.kind === "webgpu";
             const speedup =
-              r.ms != null && cpu != null && r.ms > 0
+              comparable && r.ms != null && cpu != null && r.ms > 0
                 ? (cpu / r.ms).toFixed(1) + "×"
                 : "—";
             return (
