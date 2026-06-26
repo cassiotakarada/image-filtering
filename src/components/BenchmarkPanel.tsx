@@ -1,6 +1,19 @@
 export interface BenchRow {
-  /** "babylon" | "cpu" | "cornerstone" (cpu is the speedup baseline). */
-  kind: string;
+  /**
+   * Discriminator for the benchmark row. The five values lock the table's
+   * row set (see specs/001-cornerstone-engines/contracts/benchmark-rows.md C-1):
+   *   "babylon"            — Babylon (WebGL, worker)
+   *   "cornerstone-webgl"  — Cornerstone (WebGL)
+   *   "webgpu"             — Babylon (WebGPU, main thread)
+   *   "cornerstone-webgpu" — Cornerstone (WebGPU)  [permanent placeholder]
+   *   "cpu"                — CPU (JavaScript), speedup baseline
+   */
+  kind:
+    | "babylon"
+    | "webgpu"
+    | "cpu"
+    | "cornerstone-webgl"
+    | "cornerstone-webgpu";
   name: string;
   /** Median ms over the sampled runs, or null if engine unavailable. */
   ms: number | null;
@@ -67,9 +80,14 @@ export function BenchmarkPanel({ rows, size, samples }: Props) {
       </table>
       <p className="hint">
         Babylon/CPU time = param upload + compute + GPU→CPU readback (the output
-        must be handed off). Cornerstone time = set VOI + GPU render to the
-        canvas (its native display path, no readback) — and it only does
-        windowing, so CLAHE/sharpen/segmentation have no Cornerstone equivalent.
+        must be handed off). Both Cornerstone rows time = set VOI + GPU render
+        to the canvas via the IMAGE_RENDERED event (no readback) and only do
+        windowing — CLAHE/sharpen/segmentation have no Cornerstone equivalent,
+        so their "vs CPU" column stays `—`. The Cornerstone (WebGPU) row is
+        always `n/a` because Cornerstone3D's pinned version (4.15) has no
+        WebGPU backend; the row is kept as a permanent placeholder to document
+        the environment and will populate automatically once upstream support
+        lands.
       </p>
     </div>
   );

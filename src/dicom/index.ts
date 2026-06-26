@@ -6,8 +6,9 @@ export {
   registerFilteredResult,
   setupViewport,
   showImage,
-  cornerstoneBenchSetSource,
-  cornerstoneBenchRender,
+  cornerstoneBenchSetSourceWebGL,
+  cornerstoneBenchRenderWebGL,
+  cornerstoneBenchProbeWebGPU,
   cornerstoneBackend,
 } from "./cornerstoneSetup";
 export { parseDicomFiles, describeTransferSyntax } from "./loadDicomFiles";

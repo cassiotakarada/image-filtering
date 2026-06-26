@@ -11,8 +11,9 @@ import {
 } from "./engine";
 import {
   cornerstoneBackend,
-  cornerstoneBenchRender,
-  cornerstoneBenchSetSource,
+  cornerstoneBenchProbeWebGPU,
+  cornerstoneBenchRenderWebGL,
+  cornerstoneBenchSetSourceWebGL,
   decodeCompressedFiles,
   describeTransferSyntax,
   initCornerstone,
@@ -303,12 +304,18 @@ export default function App() {
     if (!e) return;
     setBusy(true);
     setStatus("Benchmarking…");
+
+    // Time each engine into a keyed map; assemble the final rows array in the
+    // locked backend-grouped order from contracts/benchmark-rows.md C-2.
+    // This guarantees VR-1 (one of each kind) and VR-2 (order) regardless of
+    // which engines succeed. Warmup-discard + BENCH_SAMPLES median sampling
+    // is preserved for every timed row (FR-010).
+    const engineRows: Partial<Record<EngineKind, BenchRow>> = {};
     const order: EngineKind[] = ["babylon", "webgpu", "cpu"];
-    const rows: BenchRow[] = [];
     for (const k of order) {
       const eng = e[k];
       if (!eng.isAvailable()) {
-        rows.push({ kind: k, name: eng.name, ms: null, backend: eng.backend });
+        engineRows[k] = { kind: k, name: eng.name, ms: null, backend: eng.backend };
         continue;
       }
       try {
@@ -318,54 +325,87 @@ export default function App() {
           times.push(r.elapsedMs);
         }
         times.sort((a, b) => a - b);
-        rows.push({
+        engineRows[k] = {
           kind: k,
           name: eng.name,
           ms: times[Math.floor(times.length / 2)],
           backend: eng.backend,
-        });
+        };
       } catch (err) {
         // One engine failing (e.g. WebGPU shader) must not abort the benchmark.
-        rows.push({
+        engineRows[k] = {
           kind: k,
           name: eng.name,
           ms: null,
           backend: eng.backend,
           note: err instanceof Error ? err.message : String(err),
-        });
+        };
       }
     }
 
-    // Cornerstone's own GPU window/level render — the "do I even need Babylon?"
-    // baseline. Windowing only; mapped from the same brightness/contrast.
+    // Cornerstone (WebGL) — the "do I even need Babylon?" baseline. Windowing
+    // only; mapped from the same brightness/contrast. Always emits a row
+    // (real ms on success, n/a + note on failure) per FR-006 / C-3.
+    let cornerstoneWebGLRow: BenchRow;
     if (source.current) {
       try {
-        const { center, width } = await cornerstoneBenchSetSource(source.current);
+        const { center, width } = await cornerstoneBenchSetSourceWebGL(source.current);
         const winCenter = center + params.brightness * width;
         const winWidth = width / (params.contrast <= 0 ? 1 : params.contrast) || 1;
-        await cornerstoneBenchRender(winCenter, winWidth, 0); // warmup (discarded)
+        await cornerstoneBenchRenderWebGL(winCenter, winWidth, 0); // warmup (discarded)
         const times: number[] = [];
         for (let i = 0; i < BENCH_SAMPLES; i++) {
-          const ms = await cornerstoneBenchRender(winCenter, winWidth, i % 2);
+          const ms = await cornerstoneBenchRenderWebGL(winCenter, winWidth, i % 2);
           if (isFinite(ms)) times.push(ms);
         }
         times.sort((a, b) => a - b);
-        rows.push({
-          kind: "cornerstone",
-          name: "Cornerstone (GPU render)",
+        cornerstoneWebGLRow = {
+          kind: "cornerstone-webgl",
+          name: "Cornerstone (WebGL)",
           ms: times.length ? times[Math.floor(times.length / 2)] : null,
           note: "windowing only",
           backend: cornerstoneBackend(),
-        });
+        };
       } catch (err) {
-        rows.push({
-          kind: "cornerstone",
-          name: "Cornerstone (GPU render)",
+        cornerstoneWebGLRow = {
+          kind: "cornerstone-webgl",
+          name: "Cornerstone (WebGL)",
           ms: null,
           note: err instanceof Error ? err.message : "unavailable",
-        });
+          backend: cornerstoneBackend(),
+        };
       }
+    } else {
+      cornerstoneWebGLRow = {
+        kind: "cornerstone-webgl",
+        name: "Cornerstone (WebGL)",
+        ms: null,
+        note: "no source loaded",
+        backend: cornerstoneBackend(),
+      };
     }
+
+    // Cornerstone (WebGPU) — permanent placeholder. Cornerstone3D 4.15 has no
+    // WebGPU backend (see specs/001-cornerstone-engines/research.md R1), so
+    // this row is always n/a with a documented reason note (FR-007, FR-007a,
+    // FR-012, C-9). No rendering, no viewport, no GPU resources allocated.
+    const wgpuProbe = cornerstoneBenchProbeWebGPU();
+    const cornerstoneWebGPURow: BenchRow = {
+      kind: "cornerstone-webgpu",
+      name: "Cornerstone (WebGPU)",
+      ms: null,
+      note: wgpuProbe.note,
+      backend: wgpuProbe.backend,
+    };
+
+    // Assemble in locked C-2 order: backend-grouped, CPU last.
+    const rows: BenchRow[] = [
+      engineRows.babylon!,
+      cornerstoneWebGLRow,
+      engineRows.webgpu!,
+      cornerstoneWebGPURow,
+      engineRows.cpu!,
+    ];
 
     setBench(rows);
     setBusy(false);
