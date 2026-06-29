@@ -21,7 +21,7 @@ body {
 }
 
 .app {
-  max-width: 1200px;
+  max-width: 1440px;
   margin: 0 auto;
   padding: 1.25rem;
 }
@@ -39,7 +39,14 @@ header .sub {
 
 main {
   display: grid;
-  grid-template-columns: 1fr 360px;
+  /*
+   * Two columns: a square viewer on the left, a controls + bench panel on
+   * the right. The viewer floor (420px) keeps the image readable; the side
+   * column gets a sensible cap so the bench table can't push the viewer
+   * out of view (the bench's own table scrolls horizontally when it
+   * overflows; see .bench).
+   */
+  grid-template-columns: minmax(420px, 1fr) minmax(420px, 560px);
   gap: 1rem;
   align-items: start;
 }
@@ -51,6 +58,12 @@ main {
 }
 
 .viewport-wrap {
+  /*
+   * One viewport widget is visible at a time (the others get .hidden →
+   * display:none). The remaining child is a normal flow block child taking
+   * the full wrap, so the wrap's aspect-ratio resolves cleanly from the
+   * grid column width.
+   */
   background: #000;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -61,6 +74,87 @@ main {
 .viewport {
   width: 100%;
   height: 100%;
+  display: block;
+}
+
+.viewport.hidden {
+  display: none;
+}
+
+/* Babylon's <canvas> draws in its intrinsic pixel size; force it to fill the
+   wrapper so the image matches the cornerstone viewport's footprint.
+   
+   `BabylonDirectEngine` renders a full-screen quad with `vUV = (position +
+   1) / 2`, so vUV=(0,0) lands at the *bottom-left* of the framebuffer in
+   GL/WebGPU NDC. Sampling our row-0-at-top source texture there puts the
+   image top at the screen bottom — i.e. the rendered output is Y-flipped
+   relative to medical-imaging convention (and to what Cornerstone draws
+   when it owns display). The offscreen Babylon engines work around this
+   by handing the float framebuffer to Cornerstone, which Y-flips at
+   display time; the direct engines have no such intermediary, so we
+   un-flip at the CSS layer instead. This is purely a display transform —
+   the framebuffer content (used by the bench `readPixels` for parity
+   checks) is unchanged. */
+.viewport-babylon {
+  object-fit: contain;
+  transform: scaleY(-1);
+}
+
+/*
+ * Fabric.js display canvas for `babylon-cs-full-*` modes. Fabric injects
+ * its own DOM wrapper around our <canvas> (a `.canvas-container` div with
+ * the original canvas + an upper-canvas overlay for interaction), so the
+ * canvas-container is what actually needs to fill the viewport-wrap.
+ * The canvas itself uses object-fit:contain so the native image (whose
+ * intrinsic size matches the source DICOM) fits within the wrap without
+ * distortion.
+ *
+ * Unlike `.viewport-babylon`, no Y-flip is needed: we already flip on the
+ * way into the scratch canvas inside `FabricDisplay.showFromCanvas`
+ * (Babylon direct-engine pixels are bottom-up in their drawing buffer),
+ * so what Fabric draws is already row-0-at-top.
+ */
+.viewport-fabric {
+  object-fit: contain;
+}
+.viewport-wrap.display-fabric .canvas-container {
+  width: 100% !important;
+  height: 100% !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.viewport-wrap.display-fabric .canvas-container canvas {
+  max-width: 100%;
+  max-height: 100%;
+}
+/* When the live mode isn't fabric, fully hide Fabric's container.
+   Fabric appends an `upper-canvas` sibling that React doesn't know about,
+   so toggling `.hidden` on the lower canvas alone leaves that overlay
+   visible on top of whichever viewport is active (it's the last child of
+   .viewport-wrap, so it z-orders above the babylon / cornerstone canvases).
+   Hiding the container takes both canvases out of the layout in one shot. */
+.viewport-wrap:not(.display-fabric) .canvas-container {
+  display: none;
+}
+
+/*
+ * Hidden bench-only canvases for the babylon-direct rows. Kept in the DOM so
+ * Babylon can attach a real WebGL/WebGPU context to them, but positioned
+ * off-screen so they don't affect layout or get composited.
+ *
+ * We intentionally do NOT set CSS width/height here — Babylon's
+ * `engine.resize()` reads `canvas.clientWidth`/`clientHeight` (which fall
+ * back to the intrinsic `canvas.width`/`canvas.height` attributes when no
+ * CSS sizing is applied). Since `BabylonDirectEngine.setImage` sets those
+ * attributes to the image dimensions, the bench framebuffer ends up at
+ * full image resolution — which is what we need for a fair GPU bench.
+ */
+.bench-canvas {
+  position: absolute;
+  left: -10000px;
+  top: 0;
+  pointer-events: none;
 }
 
 .statusbar {
@@ -89,7 +183,7 @@ main {
 .side-col {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.5rem;
 }
 
 fieldset {
@@ -135,6 +229,15 @@ legend {
 
 .radio input:disabled + span {
   color: var(--muted);
+}
+
+/* Muted "· reason" annotation after a disabled live-mode label, e.g.
+   "Cornerstone (WebGPU) · no WebGPU backend in CS3D 4.x". */
+.radio .reason {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 0.75rem;
+  margin-left: 0.2rem;
 }
 
 .hint {
@@ -193,6 +296,12 @@ input[type="range"] {
   border-radius: 8px;
   background: var(--panel);
   padding: 0.75rem;
+  /*
+   * Allow horizontal scroll inside the panel when the table is wider than
+   * the (capped) side column. With 6 columns + nowrap cells the table can
+   * exceed the available width on smaller layouts.
+   */
+  overflow-x: auto;
 }
 
 .bench .note {
@@ -221,28 +330,132 @@ input[type="range"] {
   text-align: left;
   padding: 0.3rem 0.4rem;
   border-bottom: 1px solid var(--border);
+  /* Bench cell labels ("Babylon (WebGPU)", "Cornerstone wadouri", etc.)
+     read better on one line; the column itself will grow to fit since the
+     side panel auto-sizes to its content. */
+  white-space: nowrap;
 }
 
 .bench td:nth-child(2),
 .bench td:nth-child(3),
 .bench th:nth-child(2),
 .bench th:nth-child(3) {
+  text-align: left;
+}
+
+.bench td:nth-child(4),
+.bench td:nth-child(5),
+.bench th:nth-child(4),
+.bench th:nth-child(5) {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
-/* Per-stage breakdown sub-row under each Babylon row (spec 002 C-2). */
-.bench tr.stages-row td.stages {
+/* Use column — narrow, centred button to activate that row's pipeline as
+   the live view. */
+.bench td:nth-child(6),
+.bench th:nth-child(6) {
+  text-align: center;
+  width: 1%; /* shrink to button width */
+}
+
+.use-cell {
+  /* Keep the button vertically centred when other cells wrap. */
+  vertical-align: middle;
+}
+
+.use-btn {
+  appearance: none;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 0.1s ease-in-out, color 0.1s ease-in-out;
+}
+
+.use-btn:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.use-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.use-btn.active {
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+/* Highlight the row that matches the active liveMode so the user can find
+   it at a glance after switching modes. */
+.bench tr.bench-row.active td {
+  background: rgba(68, 147, 248, 0.1); /* tint of var(--accent) #4493f8 */
+}
+
+/* Failure / caveat sub-row under a benchmark row (shown only when `note`
+   is set on the BenchRow). */
+.bench tr.note-row td.note-cell {
   color: var(--muted, #777);
-  font-size: 0.85em;
+  font-size: 0.8em;
   padding-top: 0.1rem;
   padding-bottom: 0.5rem;
   text-align: left;
-  font-variant-numeric: tabular-nums;
   border-bottom: 1px solid var(--border);
 }
 
-.bench tr.stages-row td.stages .stages-arrow {
+.bench tr.note-row td.note-cell .note-arrow {
   margin-right: 0.25rem;
   opacity: 0.7;
+}
+
+/* Collapsible "What does this measure?" panel under the bench table.
+   Uses native <details>/<summary> so no React state or a11y wiring needed. */
+.bench-hint {
+  margin-top: 0.6rem;
+}
+
+.bench-hint > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.75rem;
+  padding: 0.25rem 0;
+  user-select: none;
+  list-style: none;
+}
+
+/* Hide the default disclosure triangle in browsers that still show one. */
+.bench-hint > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Custom rotating chevron — points right when closed, down when open. */
+.bench-hint > summary::before {
+  content: "\25B8"; /* ▸ */
+  display: inline-block;
+  margin-right: 0.35rem;
+  transition: transform 0.15s ease-in-out;
+}
+
+.bench-hint[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.bench-hint > summary:hover {
+  color: var(--text);
+}
+
+.bench-hint > .hint {
+  margin-top: 0.25rem;
+  /* Inside the collapsible, wrap normally so the explanation reads as a
+     paragraph rather than one ultra-wide line. */
+  white-space: normal;
+  max-width: 60ch;
 }

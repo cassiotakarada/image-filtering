@@ -11,6 +11,7 @@
  * reported as skipped rather than decoded.
  */
 import dicomParser from "dicom-parser";
+import { decodeJ2KSingle } from "./decodeCompressed";
 
 export interface Slice {
   data: Int16Array | Uint16Array | Uint8Array;
@@ -30,6 +31,13 @@ export interface Slice {
 
 export interface ParseOutcome {
   slices: Slice[];
+  /**
+   * Source `File` for each entry in `slices`, in the SAME order (i.e.
+   * `sourceFiles[i]` is the file that produced `slices[i]` after the
+   * instance-number sort). The benchmark needs this to re-open the active
+   * slice's original bytes on every sample.
+   */
+  sourceFiles: File[];
   skippedCompressed: number;
   skippedOther: number;
   /** Compressed transfer-syntax UIDs encountered → count (for diagnostics). */
@@ -66,7 +74,9 @@ export async function parseDicomFiles(
   files: File[],
   onProgress?: (done: number, total: number) => void
 ): Promise<ParseOutcome> {
-  const slices: Slice[] = [];
+  // Pair each slice with its source file so we can keep them aligned through
+  // the instance-number sort below.
+  const pairs: { slice: Slice; file: File }[] = [];
   let skippedCompressed = 0;
   let skippedOther = 0;
   const compressedSyntaxes: Record<string, number> = {};
@@ -74,14 +84,14 @@ export async function parseDicomFiles(
   for (let i = 0; i < files.length; i++) {
     try {
       const buf = await files[i].arrayBuffer();
-      const r = parseOne(buf);
+      const r = parseDicomBytes(buf);
       if (typeof r === "object" && r !== null && "compressed" in r) {
         skippedCompressed++;
         compressedSyntaxes[r.compressed] = (compressedSyntaxes[r.compressed] ?? 0) + 1;
       } else if (r === null) {
         skippedOther++;
       } else {
-        slices.push(r);
+        pairs.push({ slice: r, file: files[i] });
       }
     } catch {
       skippedOther++;
@@ -89,11 +99,26 @@ export async function parseDicomFiles(
     onProgress?.(i + 1, files.length);
   }
 
-  slices.sort((a, b) => a.instanceNumber - b.instanceNumber);
-  return { slices, skippedCompressed, skippedOther, compressedSyntaxes };
+  pairs.sort((a, b) => a.slice.instanceNumber - b.slice.instanceNumber);
+  return {
+    slices: pairs.map((p) => p.slice),
+    sourceFiles: pairs.map((p) => p.file),
+    skippedCompressed,
+    skippedOther,
+    compressedSyntaxes,
+  };
 }
 
-function parseOne(buf: ArrayBuffer): Slice | { compressed: string } | null {
+/**
+ * Parse one DICOM file's bytes (uncompressed transfer syntaxes only). Returns
+ * the decoded `Slice`, an object describing why parsing was skipped
+ * (`{compressed}` for compressed-transfer-syntax files), or `null` for files
+ * we couldn't recognise as DICOM images. Exposed for the single-file load
+ * path used by the open+parse+render benchmark.
+ */
+export function parseDicomBytes(
+  buf: ArrayBuffer
+): Slice | { compressed: string } | null {
   const bytes = new Uint8Array(buf);
   const ds = dicomParser.parseDicom(bytes);
 
@@ -147,4 +172,67 @@ function parseOne(buf: ArrayBuffer): Slice | { compressed: string } | null {
   const instanceNumber = parseInt(ds.string("x00200013") || "0", 10) || 0;
 
   return { data, width: cols, height: rows, min: mn, max: mx, slope, intercept, wc, ww, signed, instanceNumber };
+}
+
+// ---- single-file load path (for the open+parse+render benchmark) ----------
+
+/**
+ * Convert a parsed `Slice` into the engine-facing `ImageBuffer` shape: stored
+ * pixels copied into a `Float32Array`, plus a default window in stored-value
+ * units (the engines window the raw stored buffer).
+ */
+export function sliceToImageBuffer(
+  s: Slice
+): import("../engine/types").ImageBuffer {
+  const data = new Float32Array(s.data.length);
+  for (let i = 0; i < s.data.length; i++) data[i] = s.data[i];
+
+  // `s.wc`/`s.ww` are in MODALITY (rescaled) units; engines window in STORED
+  // units, so undo the rescale to keep the default window consistent with
+  // what `cornerstoneSetup.loadImageBuffer` produces.
+  let defaultCenter: number;
+  let defaultWidth: number;
+  if (isFinite(s.wc) && isFinite(s.ww) && s.ww > 0 && s.slope !== 0) {
+    defaultCenter = (s.wc - s.intercept) / s.slope;
+    defaultWidth = s.ww / s.slope;
+  } else {
+    defaultCenter = (s.min + s.max) / 2;
+    defaultWidth = s.max - s.min || 1;
+  }
+
+  return {
+    width: s.width,
+    height: s.height,
+    data,
+    min: s.min,
+    max: s.max,
+    defaultCenter,
+    defaultWidth,
+  };
+}
+
+/**
+ * Open + parse one DICOM File using the in-house `dicom-parser` driver (the
+ * "current library" path, in contrast to the Cornerstone wadouri loader in
+ * `cornerstoneDicomLoader.ts`). Handles uncompressed + JPEG 2000; throws on
+ * anything else. Used by the open+parse+render benchmark.
+ *
+ * The static import of `decodeCompressed` is safe — its only back-reference
+ * to this file is a `type`-only import (`type { Slice }`), which is erased
+ * at runtime and doesn't create a circular load.
+ */
+export async function loadDicomFileRaw(
+  file: File
+): Promise<import("../engine/types").ImageBuffer> {
+  const buf = await file.arrayBuffer();
+  const r = parseDicomBytes(buf);
+  if (r === null) throw new Error("not a DICOM image");
+  if ("compressed" in r) {
+    const slice = await decodeJ2KSingle(buf);
+    if (!slice) {
+      throw new Error(`unsupported compressed transfer syntax ${r.compressed}`);
+    }
+    return sliceToImageBuffer(slice);
+  }
+  return sliceToImageBuffer(r);
 }

@@ -5,12 +5,24 @@ export {
   registerSlices,
   registerFilteredResult,
   setupViewport,
+  resizeCornerstoneViewport,
   showImage,
-  cornerstoneBenchSetSourceWebGL,
-  cornerstoneBenchRenderWebGL,
+  benchDisplayImage,
   cornerstoneBenchProbeWebGPU,
   cornerstoneBackend,
 } from "./cornerstoneSetup";
-export { parseDicomFiles, describeTransferSyntax } from "./loadDicomFiles";
+export {
+  parseDicomFiles,
+  describeTransferSyntax,
+  loadDicomFileRaw,
+  sliceToImageBuffer,
+} from "./loadDicomFiles";
 export type { ParseOutcome } from "./loadDicomFiles";
 export { decodeCompressedFiles } from "./decodeCompressed";
+export {
+  initCornerstoneDicomLoader,
+  cornerstoneDicomLoaderReady,
+  cornerstoneDicomLoaderError,
+  loadDicomFileViaCornerstone,
+  purgeCornerstoneFileManager,
+} from "./cornerstoneDicomLoader";

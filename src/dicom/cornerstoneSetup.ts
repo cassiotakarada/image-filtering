@@ -161,6 +161,22 @@ export function setupViewport(element: HTMLDivElement): void {
   });
 }
 
+/**
+ * Force Cornerstone to resize its internal canvas to match the current
+ * element box. We need this because `setupViewport` runs once at init
+ * (when the cornerstone viewport widget might be `display:none` because
+ * a non-cornerstone live mode is the default), so the canvas drawing
+ * buffer ends up at the HTMLCanvasElement default of 300\u00d7150. When the
+ * user later switches to a cornerstone live mode, the element box
+ * becomes the full ~420\u00d7420 viewport-wrap square, but the canvas
+ * backing buffer stays 300\u00d7150 \u2014 CSS stretches that 300\u00d7150 framebuffer
+ * to fill the box, distorting the image horizontally (and worse,
+ * vertically). Calling this after the element becomes visible fixes it.
+ */
+export function resizeCornerstoneViewport(): void {
+  renderingEngine?.resize(true, true);
+}
+
 export async function showImage(imageId: string): Promise<void> {
   if (!renderingEngine) throw new Error("viewport not set up");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -347,60 +363,46 @@ export function cornerstoneBenchProbeWebGPU(): {
   };
 }
 
-/** Register a source buffer into the offscreen bench viewport; returns its window. */
-export async function cornerstoneBenchSetSourceWebGL(
-  img: ImageBuffer
-): Promise<{ center: number; width: number }> {
-  ensureBenchViewport();
-  counter += 1;
-  const imageId = `source:bench-${counter}`;
-  store.set(imageId, {
-    data: img.data,
-    width: img.width,
-    height: img.height,
-    min: img.min,
-    max: img.max,
-    slope: 1,
-    intercept: 0,
-    wc: img.defaultCenter,
-    ww: img.defaultWidth || 1,
-    signed: false,
-    components: 1,
-  });
-  await benchViewport.setStack([imageId]);
-  benchViewport.render();
-  return { center: img.defaultCenter, width: img.defaultWidth || 1 };
-}
-
 /**
- * Time one Cornerstone GPU window/level render (set VOI → render → rendered).
- * `jitter` nudges the VOI so identical successive calls still trigger a redraw.
+ * Show `imageId` in the offscreen bench viewport and resolve once the
+ * `IMAGE_RENDERED` event fires (i.e. pixels are on the canvas). This is the
+ * "render-to-screen" step of the open+parse+render benchmark — used for ALL
+ * row types (cornerstone direct, babylon-filtered result, cpu-filtered result)
+ * so the display cost is identical across rows.
+ *
+ * Rejects after 30s so a hung load doesn't lock up the whole benchmark.
  */
-export function cornerstoneBenchRenderWebGL(
-  center: number,
-  width: number,
-  jitter: number
-): Promise<number> {
-  return new Promise((resolve) => {
-    const el = benchElement;
-    if (!el || !benchViewport) {
-      resolve(NaN);
-      return;
-    }
-    let t0 = 0;
-    const finish = (ms: number) => {
+export function benchDisplayImage(imageId: string): Promise<void> {
+  ensureBenchViewport();
+  return new Promise<void>((resolve, reject) => {
+    const el = benchElement!;
+    let settled = false;
+    const cleanup = () => {
       el.removeEventListener(Enums.Events.IMAGE_RENDERED, onRendered);
       clearTimeout(timer);
-      resolve(ms);
     };
-    const onRendered = () => finish(performance.now() - t0);
-    const timer = setTimeout(() => finish(performance.now() - t0), 1000);
+    const onRendered = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error("bench display timed out (30s)"));
+    }, 30_000);
     el.addEventListener(Enums.Events.IMAGE_RENDERED, onRendered);
-    const lower = center - width / 2 + jitter;
-    const upper = center + width / 2 + jitter;
-    t0 = performance.now();
-    benchViewport.setProperties({ voiRange: { lower, upper } });
-    benchViewport.render();
+    benchViewport.setStack([imageId]).then(
+      () => benchViewport.render(),
+      (e: unknown) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(e instanceof Error ? e : new Error(String(e)));
+      }
+    );
   });
 }
 

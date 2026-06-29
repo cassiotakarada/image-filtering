@@ -1,14 +1,28 @@
 import { useRef } from "react";
-import type { FilterParams, Lut } from "../engine";
-import { DEFAULT_FILTERS, type EngineKind } from "../engine";
+import type { FilterParams, Lut, LiveMode } from "../engine";
+import {
+  DEFAULT_FILTERS,
+  LIVE_MODE_DESCRIPTIONS,
+  LIVE_MODE_LABELS,
+  LIVE_MODE_ORDER,
+} from "../engine";
 import type { Preset } from "../presets/presets";
 
 interface Props {
   params: FilterParams;
   onChange: (p: FilterParams) => void;
-  engineKind: EngineKind;
-  onEngineChange: (k: EngineKind) => void;
-  available: Record<EngineKind, boolean>;
+  /** Currently-active live mode (one of 9). */
+  liveMode: LiveMode;
+  /** Change handler for the live mode. */
+  onModeChange: (m: LiveMode) => void;
+  /** Which modes have working underlying engines + loaders. */
+  modeAvailable: Record<LiveMode, boolean>;
+  /**
+   * Optional per-mode reason explaining why the radio is disabled. Surfaced
+   * after the label as muted text. Used for the permanent-n/a row
+   * (cornerstone-webgpu) and for runtime-unavailable engines.
+   */
+  modeUnavailableReason: Partial<Record<LiveMode, string>>;
   size: number;
   onSizeChange: (s: number) => void;
   onLoadFiles: (files: FileList | null) => void;
@@ -25,18 +39,13 @@ interface Props {
   busy: boolean;
 }
 
-const ENGINE_LABELS: Record<EngineKind, string> = {
-  babylon: "Babylon (WebGL, worker)",
-  webgpu: "Babylon (WebGPU, main thread)",
-  cpu: "CPU (main thread)",
-};
-
 export function Controls({
   params,
   onChange,
-  engineKind,
-  onEngineChange,
-  available,
+  liveMode,
+  onModeChange,
+  modeAvailable,
+  modeUnavailableReason,
   size,
   onSizeChange,
   onLoadFiles,
@@ -183,22 +192,36 @@ export function Controls({
       </fieldset>
 
       <fieldset>
-        <legend>Engine</legend>
-        {(Object.keys(ENGINE_LABELS) as EngineKind[]).map((k) => (
-          <label key={k} className="radio">
-            <input
-              type="radio"
-              name="engine"
-              checked={engineKind === k}
-              disabled={!available[k]}
-              onChange={() => onEngineChange(k)}
-            />
-            <span>
-              {ENGINE_LABELS[k]}
-              {!available[k] ? " (unavailable)" : ""}
-            </span>
-          </label>
-        ))}
+        <legend>Engine pipeline</legend>
+        {LIVE_MODE_ORDER.map((m) => {
+          const disabled = !modeAvailable[m] || busy;
+          const reason = modeUnavailableReason[m];
+          return (
+            <label
+              key={m}
+              className="radio"
+              title={LIVE_MODE_DESCRIPTIONS[m]}
+            >
+              <input
+                type="radio"
+                name="live-mode"
+                checked={liveMode === m}
+                disabled={disabled}
+                onChange={() => onModeChange(m)}
+              />
+              <span>
+                {LIVE_MODE_LABELS[m]}
+                {reason ? <em className="reason"> · {reason}</em> : null}
+              </span>
+            </label>
+          );
+        })}
+        <p className="hint">
+          Each option corresponds to one row of the benchmark table — hover
+          for the full pipeline description. <b>Babylon-only</b> /{" "}
+          <b>CS parse only</b> modes paint directly to a Babylon canvas (no
+          Cornerstone display); the rest go through Cornerstone's viewport.
+        </p>
       </fieldset>
 
       <fieldset>

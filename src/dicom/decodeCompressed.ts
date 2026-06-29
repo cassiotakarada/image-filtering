@@ -30,15 +30,18 @@ function getOpenJpeg() {
 export async function decodeCompressedFiles(
   files: File[],
   onProgress?: (done: number, total: number) => void
-): Promise<Slice[]> {
+): Promise<{ slices: Slice[]; sourceFiles: File[] }> {
   const openjpeg = await getOpenJpeg();
-  const slices: Slice[] = [];
+  // Pair each decoded slice with its source File so we can keep them aligned
+  // through the instance-number sort. The benchmark needs the original File
+  // for the active slice to re-time open+parse on every sample.
+  const pairs: { slice: Slice; file: File }[] = [];
 
   for (let i = 0; i < files.length; i++) {
     try {
       const buf = await files[i].arrayBuffer();
       const s = decodeOne(buf, openjpeg);
-      if (s) slices.push(s);
+      if (s) pairs.push({ slice: s, file: files[i] });
     } catch {
       /* undecodable — skip */
     }
@@ -47,8 +50,21 @@ export async function decodeCompressedFiles(
     if (i % 4 === 3) await new Promise((r) => setTimeout(r));
   }
 
-  slices.sort((a, b) => a.instanceNumber - b.instanceNumber);
-  return slices;
+  pairs.sort((a, b) => a.slice.instanceNumber - b.slice.instanceNumber);
+  return {
+    slices: pairs.map((p) => p.slice),
+    sourceFiles: pairs.map((p) => p.file),
+  };
+}
+
+/**
+ * Decode a single compressed DICOM (JPEG 2000) buffer to a `Slice`. Returns
+ * `null` if the file isn't a supported compressed transfer syntax. Exposed
+ * for the single-file load path used by the open+parse+render benchmark.
+ */
+export async function decodeJ2KSingle(buf: ArrayBuffer): Promise<Slice | null> {
+  const openjpeg = await getOpenJpeg();
+  return decodeOne(buf, openjpeg);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

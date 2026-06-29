@@ -1,103 +1,146 @@
 import { Fragment } from "react";
-import type { StageTimings } from "../engine";
+import type { LiveMode } from "../engine";
+import { LIVE_MODE_DESCRIPTIONS } from "../engine";
 
+/**
+ * One row in the open+parse+render benchmark. Each row times the full
+ * wall-clock from a `File` handle to pixels on screen.
+ *
+ * `kind` is a `LiveMode` so the row maps 1:1 to a selection in the engine
+ * menu — clicking "use" on a row activates that combination as the live
+ * viewer.
+ *
+ * The full 9-row set (per Option B restructure):
+ *   "babylon-only-webgl"     — dicom-parser → babylon WebGL → babylon canvas
+ *   "babylon-only-webgpu"    — dicom-parser → babylon WebGPU → babylon canvas
+ *   "babylon-cs-full-webgl"  — cs wadouri → babylon WebGL → Fabric.js display
+ *   "babylon-cs-full-webgpu" — cs wadouri → babylon WebGPU → Fabric.js display
+ *   "babylon-cs-parse-webgl" — cs wadouri → babylon WebGL → babylon canvas
+ *   "babylon-cs-parse-webgpu"— cs wadouri → babylon WebGPU → babylon canvas
+ *   "cornerstone-webgl"      — cs wadouri → cornerstone display
+ *   "cornerstone-webgpu"     — permanent n/a placeholder
+ *   "cpu"                    — dicom-parser → cpu → cornerstone display
+ */
 export interface BenchRow {
-  /**
-   * Discriminator for the benchmark row. The five values lock the table's
-   * row set (see specs/001-cornerstone-engines/contracts/benchmark-rows.md C-1):
-   *   "babylon"            — Babylon (WebGL, worker)
-   *   "cornerstone-webgl"  — Cornerstone (WebGL)
-   *   "webgpu"             — Babylon (WebGPU, main thread)
-   *   "cornerstone-webgpu" — Cornerstone (WebGPU)  [permanent placeholder]
-   *   "cpu"                — CPU (JavaScript), speedup baseline
-   */
-  kind:
-    | "babylon"
-    | "webgpu"
-    | "cpu"
-    | "cornerstone-webgl"
-    | "cornerstone-webgpu";
+  kind: LiveMode;
+  /** Renderer + display label (e.g. "Babylon (WebGL) · babylon canvas"). */
   name: string;
-  /** Median ms over the sampled runs, or null if engine unavailable. */
+  /** Parser label ("Cornerstone wadouri", "dicom-parser", or "—"). */
+  parser: string;
+  /** Median wall-clock ms over the sampled runs, or null if the row failed. */
   ms: number | null;
-  /** Optional caveat shown after the row (e.g. windowing-only). */
-  note?: string;
   /** Graphics backend label (e.g. "WebGL2"). */
   backend?: string;
-  /**
-   * Per-stage medians (same BENCH_SAMPLES window + warmup-discard as `ms`).
-   * Filled ONLY for `kind: "babylon"` and `kind: "webgpu"` rows. MUST be
-   * undefined on `cpu`, `cornerstone-webgl`, `cornerstone-webgpu`, and on
-   * any Babylon row whose `ms` is `null` (engine unavailable).
-   */
-  stages?: StageTimings;
+  /** Optional caveat shown after the row (e.g. failure reason). */
+  note?: string;
 }
 
 interface Props {
   rows: BenchRow[] | null;
-  size: number;
   samples: number;
+  /**
+   * Short description of what was benchmarked (e.g. file name + dimensions).
+   * Surfaced in the header so the user knows which slice the numbers came from.
+   */
+  subject: string | null;
+  /** Currently active live mode — used to highlight the row in the table. */
+  liveMode: LiveMode;
+  /**
+   * Called when the user clicks "use" on a row. The permanent-n/a row
+   * (cornerstone-webgpu) suppresses its own button, so this is only ever
+   * called with a usable mode.
+   */
+  onUseMode: (mode: LiveMode) => void;
+  /** Disable interaction (used while the bench is mid-run). */
+  busy: boolean;
 }
 
-export function BenchmarkPanel({ rows, size, samples }: Props) {
+export function BenchmarkPanel({
+  rows,
+  samples,
+  subject,
+  liveMode,
+  onUseMode,
+  busy,
+}: Props) {
   if (!rows) {
     return (
       <div className="bench empty">
-        <p>Run the benchmark to compare engines on the current filter settings.</p>
+        <p>
+          Load a DICOM folder, then run the benchmark to compare end-to-end
+          open+parse+render time across libraries.
+        </p>
       </div>
     );
   }
 
-  const cpu = rows.find((r) => r.kind === "cpu")?.ms ?? null;
+  // Compare each row to the Cornerstone (WebGL) full-pipeline number — the
+  // reference baseline for "how fast does an established viewer get a DICOM
+  // on screen". Falls back to the CPU row if Cornerstone is unavailable.
+  const baseline =
+    rows.find((r) => r.kind === "cornerstone-webgl")?.ms ??
+    rows.find((r) => r.kind === "cpu")?.ms ??
+    null;
 
   return (
     <div className="bench">
       <h3>
-        Benchmark — {size}×{size}, median of {samples} runs
+        End-to-end · median of {samples} runs
+        {subject ? <span className="note"> · {subject}</span> : null}
       </h3>
       <table>
         <thead>
           <tr>
-            <th>Engine</th>
+            <th>Renderer</th>
+            <th>Parser</th>
             <th>Backend</th>
             <th>ms / run</th>
-            <th>vs CPU</th>
+            <th>vs CS-WebGL</th>
+            <th>Use</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => {
-            // Only Babylon/CPU do the SAME work, so only their ratio is a real
-            // speedup. Cornerstone does windowing only — comparing it to the
-            // full-pipeline CPU number would be meaningless, so we don't.
-            const comparable = r.kind === "babylon" || r.kind === "webgpu";
-            const speedup =
-              comparable && r.ms != null && cpu != null && r.ms > 0
-                ? (cpu / r.ms).toFixed(1) + "×"
-                : "—";
-            // Stage breakdown sub-row: only the two Babylon rows surface it,
-            // and only when the engine produced a real `ms` (otherwise `stages`
-            // is undefined). See contracts/stage-breakdown.md C-2.
-            const showStages = comparable && r.stages != null;
+            // Speedup only meaningful when both this row and the baseline
+            // produced a real time. ">1×" = faster than Cornerstone, "<1×" =
+            // slower. The baseline row itself shows "baseline".
+            let vsCol: string;
+            if (r.kind === "cornerstone-webgl") {
+              vsCol = "baseline";
+            } else if (r.ms != null && baseline != null && r.ms > 0) {
+              vsCol = (baseline / r.ms).toFixed(2) + "×";
+            } else {
+              vsCol = "—";
+            }
+            const active = r.kind === liveMode;
+            // The permanent-n/a row (cornerstone-webgpu) can't drive a live
+            // view, so we suppress its "use" button.
+            const useable = r.kind !== "cornerstone-webgpu";
             return (
               <Fragment key={r.kind}>
-                <tr>
-                  <td>
-                    {r.name}
-                    {r.note ? <span className="note"> · {r.note}</span> : null}
-                  </td>
+                <tr className={active ? "bench-row active" : "bench-row"}>
+                  <td>{r.name}</td>
+                  <td>{r.parser}</td>
                   <td>{r.backend ?? "—"}</td>
-                  <td>{r.ms != null ? r.ms.toFixed(2) : "n/a"}</td>
-                  <td>{r.kind === "cpu" ? "baseline" : speedup}</td>
+                  <td>{r.ms != null ? r.ms.toFixed(1) : "n/a"}</td>
+                  <td>{vsCol}</td>
+                  <td className="use-cell">
+                    {useable ? (
+                      <button
+                        className={"use-btn" + (active ? " active" : "")}
+                        disabled={busy || active}
+                        onClick={() => onUseMode(r.kind)}
+                        title={LIVE_MODE_DESCRIPTIONS[r.kind]}
+                      >
+                        {active ? "active" : "use"}
+                      </button>
+                    ) : null}
+                  </td>
                 </tr>
-                {showStages ? (
-                  <tr className="stages-row">
-                    <td colSpan={4} className="stages">
-                      <span className="stages-arrow">↳</span> compile{" "}
-                      {r.stages!.compile.toFixed(2)} · upload{" "}
-                      {r.stages!.upload.toFixed(2)} · compute{" "}
-                      {r.stages!.compute.toFixed(2)} · readback{" "}
-                      {r.stages!.readback.toFixed(2)} · round-trip{" "}
-                      {r.stages!.roundTrip.toFixed(2)}
+                {r.note ? (
+                  <tr className="note-row">
+                    <td colSpan={6} className="note-cell">
+                      <span className="note-arrow">↳</span> {r.note}
                     </td>
                   </tr>
                 ) : null}
@@ -106,30 +149,33 @@ export function BenchmarkPanel({ rows, size, samples }: Props) {
           })}
         </tbody>
       </table>
-      <p className="hint">
-        Each Babylon row's <code>ms / run</code> decomposes into five stages
-        rendered on the sub-line beneath it (per-stage medians over the same{" "}
-        {samples}-sample window, computed independently). <b>compile</b> is the
-        wait for the filter shader to become ready inside <code>run()</code>{" "}
-        (usually 0 after warmup). <b>upload</b> covers per-run uniform setters,
-        the CLAHE map (re)build when CLAHE &gt; 0, and the LUT swap. <b>compute</b>{" "}
-        is the <code>proc.render()</code> GPU command submit. <b>readback</b> is{" "}
-        <code>await proc.readPixels()</code>, including the implicit GPU sync
-        that resolves it. <b>round-trip</b> is the main↔worker postMessage
-        overhead (always 0 on the WebGPU row — it runs on the main thread by
-        design, because Babylon's GLSL→WGSL transpiler can't be loaded from a
-        module worker). The first four stages sum to <code>ms / run</code>
-        within ~5%; round-trip is reported separately because it's outside the
-        engine's internal timed region. CPU and the two Cornerstone rows do
-        not show a breakdown: CPU runs as a single synchronous pass, and
-        Cornerstone does windowing only via <code>IMAGE_RENDERED</code> and
-        doesn't decompose into the Babylon-shaped stages — that's why their
-        "vs CPU" column stays <code>—</code> too. The Cornerstone (WebGPU) row
-        is always <code>n/a</code> because Cornerstone3D's pinned version
-        (4.15) has no WebGPU backend; the row is kept as a permanent
-        placeholder to document the environment and will populate
-        automatically once upstream support lands.
-      </p>
+      <details className="bench-hint">
+        <summary>What does this measure?</summary>
+        <p className="hint">
+          Each row is the wall-clock time to go from a <code>File</code> handle
+          to pixels on screen: open the file's bytes, parse the DICOM (with the
+          library named in the <b>Parser</b> column), and render it (with the
+          library named in the <b>Renderer</b> column).{" "}
+          <b>babylon canvas</b> rows render via Babylon's own swapchain (no
+          readback to CPU, no second pass through Cornerstone).{" "}
+          <b>cornerstone display</b> rows hand the filter's pixel buffer back
+          to a Cornerstone StackViewport, which adds a GPU→CPU readback plus a
+          second on-screen render.{" "}
+          <b>Babylon + CS + Fabric</b> rows are the CSOI-Web target flow:
+          Cornerstone parses the DICOM, Babylon (direct engine) does the
+          filter math straight into its own canvas, and that canvas is
+          drawImage'd into a Fabric.js backgroundImage (so downstream code
+          can attach annotation tools / overlays via Fabric instead of
+          Cornerstone's tool stack). No readPixels or Float32 → Uint8
+          conversion — the Babylon→Fabric copy stays canvas-to-canvas. <i>Cornerstone wadouri</i> uses{" "}
+          <code>@cornerstonejs/dicom-image-loader</code> (the worker-based
+          official path); <i>dicom-parser</i> uses the in-house single-file
+          loader. The Cornerstone (WebGPU) row is always <code>n/a</code>{" "}
+          because Cornerstone3D 4.15.x has no WebGPU backend. Click <b>use</b>{" "}
+          on any row to switch the live view to that combination.
+        </p>
+      </details>
     </div>
   );
 }
+

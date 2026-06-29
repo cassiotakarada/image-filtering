@@ -171,6 +171,43 @@ function buildPipeline(data: Float32Array) {
   );
   proc.refreshRate = 0; // we render manually, once per run()
   proc.setTexture("src", input);
+  // Pre-register every uniform/sampler the shader uses BEFORE the first
+  // isReady() call. Babylon's ProceduralTexture builds the GLSL/WGSL uniforms
+  // list from `_uniforms` / `_samplers` at compile time, and any name added
+  // later (i.e. inside handleRun) becomes a silent no-op when render() tries
+  // to upload it. Placeholder values are overwritten in handleRun.
+  proc.setTexture("lut", identityLut!);
+  proc.setTexture("claheTex", dummyClahe!);
+  proc.setVector2("texel", new Vector2(1 / imgW, 1 / imgH));
+  proc.setFloat("winLow", 0);
+  proc.setFloat("winWidth", 1);
+  proc.setFloat("denoiseAmt", 0);
+  proc.setFloat("sharpenAmt", 0);
+  proc.setFloat("edgeAmt", 0);
+  proc.setFloat("gammaVal", 1);
+  proc.setFloat("invertFlag", 0);
+  proc.setFloat("claheFlag", 0);
+  proc.setFloat("claheAmt", 0);
+  proc.setVector2("claheTilePx", new Vector2(imgW, imgH));
+  proc.setVector2("claheGrid", new Vector2(1, 1));
+  proc.setFloat("claheBins", 1);
+  proc.setFloat("claheRows", 1);
+  proc.setFloat("lutFlag", 0);
+  proc.setFloat("segFlag", 0);
+  proc.setFloat("segT1", 0);
+  proc.setFloat("segT2", 0);
+  proc.setFloat("segFeather", 0);
+  proc.setFloat("segTissueGain", 1);
+  proc.setFloat("segTissueBias", 0);
+  proc.setFloat("segBoneGain", 1);
+  proc.setFloat("segToothGain", 1);
+  proc.setFloat("segToothBias", 0);
+  proc.setFloat("segView", 0);
+  proc.setFloat("segTint", 0);
+  proc.setColor3("segColTissue", new Color3(...SEG_COLORS.tissue));
+  proc.setColor3("segColBone", new Color3(...SEG_COLORS.bone));
+  proc.setColor3("segColTooth", new Color3(...SEG_COLORS.tooth));
+  proc.setFloat("outMax", OUTPUT_MAX);
 }
 
 /**
